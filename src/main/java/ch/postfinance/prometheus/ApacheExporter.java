@@ -1,5 +1,6 @@
 package ch.postfinance.prometheus;
 
+import io.prometheus.client.Collector;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
@@ -14,8 +15,20 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 
 public class ApacheExporter {
+
+    private String statusUrl;
+
+    public ApacheExporter(){
+
+    }
+
+    public ApacheExporter(String statusUrl){
+        this.statusUrl = statusUrl;
+    }
 
     CollectorRegistry registry = new CollectorRegistry();
 
@@ -97,6 +110,19 @@ public class ApacheExporter {
         return new String(stream.toByteArray());
     }
 
+    public ArrayList<Collector.MetricFamilySamples> exportSamplesList() {
+        try {
+            mapStatusToMetrics(readApacheStatus());
+            serverUpGauge.set(1);
+        } catch (InterruptedException | IOException e) {
+            scrapeErrorsTotal.inc();
+            serverUpGauge.set(0);
+        }
+
+        return Collections.list(registry.metricFamilySamples());
+
+    }
+
     private void mapStatusToMetrics(String statusData) {
         statusData.lines().parallel().forEach(line -> {
             String[] elems = line.split(":");
@@ -136,7 +162,7 @@ public class ApacheExporter {
 
     String readApacheStatus() throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost/server-status?auto"))
+                .uri(URI.create(getStatusUrl()))
                 .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build();
@@ -202,6 +228,25 @@ public class ApacheExporter {
         }
 
         return "unknown";
+    }
+
+    String getStatusUrl() {
+
+        if (this.statusUrl != null) {
+            return this.statusUrl;
+        } else {
+
+            String statusUrl = System.getProperty("httpdModStatusUrl");
+
+            if (statusUrl == null || statusUrl.trim().isEmpty()) {
+                statusUrl = System.getenv("HTTPD_MOD_STATUS_URL");
+
+                if (statusUrl == null || statusUrl.trim().isEmpty())
+                    statusUrl = "http://localhost/server-status?auto";
+            }
+
+            return statusUrl;
+        }
     }
 
 }
